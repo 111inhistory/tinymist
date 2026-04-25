@@ -32,7 +32,9 @@ import { extensionState } from "../state";
 /**
  * The launch preview implementation which depends on `isCompat` of previewActivate.
  */
-let launchImpl: typeof launchPreviewLsp;
+let launchImpl: (
+  task: LaunchInBrowserTask | LaunchInWebViewTask,
+) => Promise<{ message: string; taskId?: string }>;
 
 /**
  * The state corresponding to the focusing preview panel.
@@ -122,6 +124,9 @@ export function previewActivate(context: vscode.ExtensionContext, isCompat: bool
         return {
           panel: !!t.panel,
           taskId: t.taskId,
+          browserUrl: t.browserUrl,
+          dataPlanePort: t.dataPlanePort,
+          staticServerPort: t.staticServerPort,
         };
       });
       return {
@@ -419,6 +424,22 @@ interface TaskControlBlock {
   panel?: vscode.WebviewPanel;
   /// random task id
   taskId: string;
+  /// resources owned by the preview task
+  disposes: DisposeList;
+  /// The port number of the data plane server.
+  dataPlanePort: string | number;
+  /// The port number of the static server.
+  staticServerPort: string | number;
+  /// The URL opened by browser preview.
+  browserUrl: string;
+  /// Whether the task has ever been opened in an external browser.
+  hasBrowser: boolean;
+  /// Preview mode used when the task was started.
+  mode: "doc" | "slide";
+  /// Whether the task was started in browsing mode.
+  isBrowsing: boolean;
+  /// Whether the task was started in development preview mode.
+  isDev: boolean;
 }
 const activeTask = new Map<vscode.TextDocument, TaskControlBlock>();
 
@@ -429,12 +450,50 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
   /**
    * Can only open one preview for one document.
    */
-  if (activeTask.has(bindDocument)) {
-    const { panel } = activeTask.get(bindDocument)!;
-    if (panel) {
-      panel.reveal();
+  const existingTask = activeTask.get(bindDocument);
+  if (existingTask) {
+    if (
+      existingTask.mode === task.mode &&
+      existingTask.isBrowsing === !!isBrowsing &&
+      existingTask.isDev === !!isDev
+    ) {
+      switch (kind) {
+        case "webview": {
+          if (existingTask.panel) {
+            existingTask.panel.reveal();
+          } else {
+            existingTask.panel = await openPreviewInWebView({
+              context,
+              task,
+              activeEditor: editor,
+              dataPlanePort: existingTask.dataPlanePort,
+              webviewPanel,
+              async panelDispose() {
+                existingTask.panel = undefined;
+                if (!existingTask.hasBrowser) {
+                  existingTask.disposes.dispose();
+                  await tinymist.killPreview(existingTask.taskId);
+                }
+              },
+            });
+          }
+          break;
+        }
+        case "browser": {
+          existingTask.hasBrowser = true;
+          vscode.env.openExternal(vscode.Uri.parse(existingTask.browserUrl));
+          vscode.window.showInformationMessage(
+            `Tinymist preview is running at ${existingTask.browserUrl}`,
+          );
+          break;
+        }
+      }
+      return { message: "existed", taskId: existingTask.taskId };
     }
-    return { message: "existed" };
+
+    existingTask.disposes.dispose();
+    await tinymist.killPreview(existingTask.taskId);
+    activeTask.delete(bindDocument);
   }
 
   const taskId = Math.random().toString(36).substring(7);
@@ -462,6 +521,7 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
   }
 
   let panel: vscode.WebviewPanel | undefined = undefined;
+  const browserUrl = `http://${previewHost.browser}:${staticServerPort}`;
   switch (kind) {
     case "webview": {
       panel = await openPreviewInWebView({
@@ -471,16 +531,21 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
         dataPlanePort,
         webviewPanel,
         async panelDispose() {
-          disposes.dispose();
-          await tinymist.killPreview(taskId);
+          const active = activeTask.get(bindDocument);
+          if (active) {
+            active.panel = undefined;
+          }
+          if (!active?.hasBrowser) {
+            disposes.dispose();
+            await tinymist.killPreview(taskId);
+          }
         },
       });
       break;
     }
     case "browser": {
-      vscode.env.openExternal(
-        vscode.Uri.parse(`http://${previewHost.browser}:${staticServerPort}`),
-      );
+      vscode.env.openExternal(vscode.Uri.parse(browserUrl));
+      vscode.window.showInformationMessage(`Tinymist preview is running at ${browserUrl}`);
       break;
     }
   }
@@ -490,6 +555,14 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
   activeTask.set(bindDocument, {
     panel,
     taskId,
+    disposes,
+    dataPlanePort,
+    staticServerPort,
+    browserUrl,
+    hasBrowser: kind === "browser",
+    mode: task.mode,
+    isBrowsing: !!isBrowsing,
+    isDev: !!isDev,
   });
   disposes.add(() => {
     if (activeTask.get(bindDocument)?.taskId === taskId) {
