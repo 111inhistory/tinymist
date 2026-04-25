@@ -205,13 +205,16 @@ fn is_valid_origin_impl(
         return false;
     };
 
+    let expected_host = {
+        let expected_url = Url::parse(&format!("http://{static_file_addr}")).unwrap();
+        expected_url.host_str().unwrap().to_owned()
+    };
     let expected_origin = {
-        let expected_host = Url::parse(&format!("http://{static_file_addr}")).unwrap();
-        let expected_host = expected_host.host_str().unwrap();
         // Don't take the port from `static_file_addr` (it may have a dummy port e.g.
         // `127.0.0.1:0`)
         format!("http://{expected_host}:{expected_port}")
     };
+    let is_unspecified_host = matches!(expected_host.as_str(), "0.0.0.0" | "::");
 
     let gitpod_expected_origin = gitpod_id_and_host
         .as_ref()
@@ -230,6 +233,13 @@ fn is_valid_origin_impl(
     });
 
     *origin_header == expected_origin
+        // Wildcard addresses are bind addresses, not browser-visible addresses. If the user
+        // explicitly listens on all interfaces, accept the actual HTTP host on the same port.
+        || (
+            is_unspecified_host
+            && origin_url.scheme() == "http"
+            && origin_url.port_or_known_default() == Some(expected_port)
+        )
         // tmistele (PR #1382): The VSCode webview panel needs an exception: It doesn't send `http://{static_file_addr}`
         // as `Origin`. Instead it sends `vscode-webview://<random>`. Thus, we allow any
         // `Origin` starting with `vscode-webview://` as well. I think that's okay from a security
@@ -335,6 +345,26 @@ mod tests {
         assert!(!check_origin("http://huh2.io:42", "huh.io:0", 42));
         assert!(!check_origin("http://huh2.io", "huh.io:42", 42));
         assert!(!check_origin("https://huh2.io", "huh.io:42", 42));
+    }
+
+    #[test]
+    fn test_origin_wildcard_binding() {
+        assert!(check_origin("http://192.168.2.124:5986", "0.0.0.0:0", 5986));
+        assert!(check_origin(
+            "http://192.168.2.124:5986",
+            "0.0.0.0:5986",
+            5986
+        ));
+        assert!(!check_origin(
+            "http://192.168.2.124:5987",
+            "0.0.0.0:0",
+            5986
+        ));
+        assert!(!check_origin(
+            "https://192.168.2.124:5986",
+            "0.0.0.0:0",
+            5986
+        ));
     }
 
     // https://github.com/Myriad-Dreamin/tinymist/issues/1350

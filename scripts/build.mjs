@@ -1,3 +1,4 @@
+import "tsx/esm";
 import * as build from "./builders.mjs";
 
 const kind = process.argv[2];

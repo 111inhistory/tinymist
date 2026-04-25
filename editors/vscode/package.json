@@ -885,6 +885,18 @@
           "markdownDeprecationMessage": "%extension.tinymist.config.tinymist.preview.pinPreviewFile.deprecation%",
           "type": "boolean",
           "default": false
+        },
+        "tinymist.preview.dataPlaneHost": {
+          "title": "Preview data plane host",
+          "markdownDescription": "The host and port used by the preview server. Use `0.0.0.0:0` to listen on all interfaces with a random port.",
+          "type": "string",
+          "default": "127.0.0.1:0"
+        },
+        "tinymist.preview.browserHost": {
+          "title": "Preview browser host",
+          "markdownDescription": "The host name or IP address opened by browser preview. Set this to the LAN IP when `tinymist.preview.dataPlaneHost` listens on `0.0.0.0`.",
+          "type": "string",
+          "default": ""
         }
       }
     },

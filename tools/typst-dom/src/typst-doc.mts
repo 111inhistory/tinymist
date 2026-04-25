@@ -218,27 +218,43 @@ export class TypstDocumentContext<O = any> {
       pageX: number | undefined,
       pageY: number | undefined,
     ) => {
-      const prevScaleRatio = this.currentScaleRatio;
       // Get wheel scroll direction and calculate new scale
+      let nextScaleRatio = this.currentScaleRatio;
       if (scrollDirection === -1) {
         // enlarge
-        if (this.currentScaleRatio >= factors.at(-1)!) {
+        if (nextScaleRatio >= factors.at(-1)!) {
           // already large than max factor
           return;
         } else {
-          this.currentScaleRatio = factors.filter((x) => x > this.currentScaleRatio).at(0)!;
+          nextScaleRatio = factors.filter((x) => x > nextScaleRatio).at(0)!;
         }
       } else if (scrollDirection === 1) {
         // reduce
-        if (this.currentScaleRatio <= factors.at(0)!) {
+        if (nextScaleRatio <= factors.at(0)!) {
           return;
         } else {
-          this.currentScaleRatio = factors.filter((x) => x < this.currentScaleRatio).at(-1)!;
+          nextScaleRatio = factors.filter((x) => x < nextScaleRatio).at(-1)!;
         }
       } else {
         // no y-axis scroll
         return;
       }
+
+      applyScaleRatio(nextScaleRatio, pageX, pageY);
+    };
+
+    const applyScaleRatio = (
+      nextScaleRatio: number,
+      pageX: number | undefined,
+      pageY: number | undefined,
+    ) => {
+      nextScaleRatio = Math.min(Math.max(nextScaleRatio, factors[0]), factors.at(-1)!);
+      if (Math.abs(nextScaleRatio - this.currentScaleRatio) < 1e-5) {
+        return;
+      }
+
+      const prevScaleRatio = this.currentScaleRatio;
+      this.currentScaleRatio = nextScaleRatio;
       const scrollFactor = this.currentScaleRatio / prevScaleRatio;
 
       // hide scrollbar if scale == 1
@@ -327,21 +343,98 @@ export class TypstDocumentContext<O = any> {
       }
     };
 
+    let touchStartDistance = 0;
+    let touchStartScaleRatio = 1;
+    const touchDistance = (touches: TouchList) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    };
+    const touchCenter = (touches: TouchList) => {
+      return {
+        clientX: (touches[0].clientX + touches[1].clientX) / 2,
+        clientY: (touches[0].clientY + touches[1].clientY) / 2,
+      };
+    };
+    const touchStartEventHandler = (event: TouchEvent) => {
+      if (event.touches.length !== 2) {
+        return;
+      }
+
+      event.preventDefault();
+      this.cachedDOMState = this.retrieveDOMState();
+      if (this.windowElem.onresize !== null) {
+        this.windowElem.onresize = null;
+      }
+
+      touchStartDistance = touchDistance(event.touches);
+      touchStartScaleRatio = this.currentScaleRatio;
+    };
+    const touchMoveEventHandler = (event: TouchEvent) => {
+      if (event.touches.length !== 2) {
+        return;
+      }
+
+      event.preventDefault();
+      if (touchStartDistance <= 0) {
+        touchStartDistance = touchDistance(event.touches);
+        touchStartScaleRatio = this.currentScaleRatio;
+        return;
+      }
+
+      const baseRect = this.hookedElem.getBoundingClientRect();
+      const center = touchCenter(event.touches);
+      applyScaleRatio(
+        touchStartScaleRatio * (touchDistance(event.touches) / touchStartDistance),
+        center.clientX - baseRect.x,
+        center.clientY - baseRect.y,
+      );
+    };
+    const touchEndEventHandler = (event: TouchEvent) => {
+      if (event.touches.length < 2) {
+        touchStartDistance = 0;
+      }
+    };
+
     const vscodeAPI = typeof acquireVsCodeApi !== "undefined";
     if (vscodeAPI) {
       window.addEventListener("wheel", wheelEventHandler, {
         passive: false,
       });
+      window.addEventListener("touchstart", touchStartEventHandler, {
+        passive: false,
+      });
+      window.addEventListener("touchmove", touchMoveEventHandler, {
+        passive: false,
+      });
+      window.addEventListener("touchend", touchEndEventHandler);
+      window.addEventListener("touchcancel", touchEndEventHandler);
       this.disposeList.push(() => {
         window.removeEventListener("wheel", wheelEventHandler);
+        window.removeEventListener("touchstart", touchStartEventHandler);
+        window.removeEventListener("touchmove", touchMoveEventHandler);
+        window.removeEventListener("touchend", touchEndEventHandler);
+        window.removeEventListener("touchcancel", touchEndEventHandler);
       });
     } else {
       document.body.addEventListener("wheel", wheelEventHandler, {
         passive: false,
       });
+      document.body.addEventListener("touchstart", touchStartEventHandler, {
+        passive: false,
+      });
+      document.body.addEventListener("touchmove", touchMoveEventHandler, {
+        passive: false,
+      });
+      document.body.addEventListener("touchend", touchEndEventHandler);
+      document.body.addEventListener("touchcancel", touchEndEventHandler);
       document.body.addEventListener("keydown", keydownEventHandler);
       this.disposeList.push(() => {
         document.body.removeEventListener("wheel", wheelEventHandler);
+        document.body.removeEventListener("touchstart", touchStartEventHandler);
+        document.body.removeEventListener("touchmove", touchMoveEventHandler);
+        document.body.removeEventListener("touchend", touchEndEventHandler);
+        document.body.removeEventListener("touchcancel", touchEndEventHandler);
         document.body.removeEventListener("keydown", keydownEventHandler);
       });
     }

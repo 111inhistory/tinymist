@@ -256,6 +256,40 @@ function getPreviewConfCompat<T>(s: string) {
   return t;
 }
 
+function getPreviewHostName(host: string): string {
+  const trimmed = host.trim();
+  if (trimmed.startsWith("[")) {
+    return trimmed.slice(1, trimmed.indexOf("]"));
+  }
+
+  const portStart = trimmed.lastIndexOf(":");
+  return portStart >= 0 ? trimmed.slice(0, portStart) : trimmed;
+}
+
+function formatPreviewHostName(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+function getPreviewBrowserHost(dataPlaneHost: string): string {
+  const configuredHost = getPreviewConfCompat<string>("browserHost")?.trim();
+  if (configuredHost) {
+    return configuredHost;
+  }
+
+  const hostName = getPreviewHostName(dataPlaneHost);
+  if (hostName === "0.0.0.0" || hostName === "::") {
+    return "127.0.0.1";
+  }
+
+  return hostName || "127.0.0.1";
+}
+
+function getPreviewHost() {
+  const dataPlane = getPreviewConfCompat<string>("dataPlaneHost") || "127.0.0.1:0";
+  const browser = formatPreviewHostName(getPreviewBrowserHost(dataPlane));
+  return { dataPlane, browser };
+}
+
 /**
  * The arguments for launching the preview in a builtin vscode webview.
  */
@@ -363,7 +397,10 @@ export async function openPreviewInWebView({
   html = html.replace("preview-arg:state:", `preview-arg:state:${previewStateEncoded}`);
   // Forwards the localhost port to the external URL. Since WebSocket runs over HTTP, it should be fine.
   // https://code.visualstudio.com/api/advanced-topics/remote-extensions#forwarding-localhost
-  let wsURI = await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${dataPlanePort}`));
+  const previewHost = getPreviewHost();
+  let wsURI = await vscode.env.asExternalUri(
+    vscode.Uri.parse(`http://${previewHost.browser}:${dataPlanePort}`),
+  );
   let wsURIString = wsURI.toString().replace(/^http/, "ws");
   html = html.replace("ws://127.0.0.1:23625", wsURIString);
 
@@ -406,6 +443,7 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
   const disposes = new DisposeList();
   registerPreviewTaskDispose(taskId, disposes);
 
+  const previewHost = getPreviewHost();
   const { dataPlanePort, staticServerPort, isPrimary } = await invokeLspCommand();
   if (!dataPlanePort || !staticServerPort) {
     disposes.dispose();
@@ -416,7 +454,7 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
   task.isNotPrimary = !isPrimary;
 
   if (isPrimary) {
-    const connectUrl = translateExternalURL(`ws://127.0.0.1:${dataPlanePort}`);
+    const connectUrl = translateExternalURL(`ws://${previewHost.browser}:${dataPlanePort}`);
     contentPreviewProvider.then((p) => p.postActivate(connectUrl));
     disposes.add(() => {
       contentPreviewProvider.then((p) => p.postDeactivate(connectUrl));
@@ -440,7 +478,9 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
       break;
     }
     case "browser": {
-      vscode.env.openExternal(vscode.Uri.parse(`http://127.0.0.1:${staticServerPort}`));
+      vscode.env.openExternal(
+        vscode.Uri.parse(`http://${previewHost.browser}:${staticServerPort}`),
+      );
       break;
     }
   }
@@ -466,7 +506,7 @@ async function launchPreviewLsp(task: LaunchInBrowserTask | LaunchInWebViewTask)
 
     console.log(`Preview Command ${filePath}`);
     const previewInSlideModeArgs = task.mode === "slide" ? ["--preview-mode=slide"] : [];
-    const dataPlaneHostArgs = !isDev ? ["--data-plane-host", "127.0.0.1:0"] : [];
+    const dataPlaneHostArgs = !isDev ? ["--data-plane-host", previewHost.dataPlane] : [];
 
     const previewArgs = [
       "--task-id",

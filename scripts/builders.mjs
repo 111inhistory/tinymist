@@ -5,11 +5,6 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import copyDirSync from "cpr";
 
-import {
-  generate as generateTextmate,
-  install as installTextmate,
-} from "../syntaxes/textmate/main.ts";
-
 /// The default working directory is the root of the project
 const cwd = path.resolve(import.meta.dirname, "..");
 const vscodeDir = path.resolve(cwd, "editors/vscode");
@@ -86,6 +81,9 @@ export async function buildL10n() {
 }
 
 export async function buildSyntax() {
+  const { generate: generateTextmate, install: installTextmate } = await import(
+    "../syntaxes/textmate/main.ts"
+  );
   await generateTextmate();
   await installTextmate();
 }
@@ -180,16 +178,19 @@ export async function buildLspBinary(kind) {
   );
 
   const binName = process.platform === "win32" ? "tinymist.exe" : "tinymist";
+  const cargoTargetDir = process.env.CARGO_TARGET_DIR
+    ? path.resolve(process.env.CARGO_TARGET_DIR)
+    : path.resolve(cwd, "target");
 
   await Promise.all([
     fs.copyFile(
-      path.resolve(cwd, `target/${kind}/${binName}`),
+      path.resolve(cargoTargetDir, kind, binName),
       path.resolve(vscodeDir, `out/${binName}`),
     ),
     process.platform === "win32" && kind === "debug"
       ? [
           fs.copyFile(
-            path.resolve(cwd, `target/debug/tinymist.pdb`),
+            path.resolve(cargoTargetDir, "debug/tinymist.pdb"),
             path.resolve(vscodeDir, `out/tinymist.pdb`),
           ),
         ]
