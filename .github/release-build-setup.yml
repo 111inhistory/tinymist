@@ -5,6 +5,8 @@
     cache: 'yarn'
 - name: Install Node dependencies
   run: yarn install
+- name: Install Rust toolchain
+  uses: actions-rust-lang/setup-rust-toolchain@v1
 - name: Build bundled assets
   run: |
     yarn build:preview
