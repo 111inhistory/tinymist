@@ -61,7 +61,6 @@ install-updater = false
 install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
 # Whether to cache builds
 cache-builds = true
-allow-dirty = ["ci"]
 
 global-artifacts-jobs = ["./build-vscode", "./ci-check-e2e"]
 github-custom-job-permissions = { "build-vscode" = { contents = "write" } }
