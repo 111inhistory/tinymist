@@ -1,0 +1,11 @@
+- name: Install Node.js
+  uses: actions/setup-node@v4
+  with:
+    node-version: 24
+    cache: 'yarn'
+- name: Install Node dependencies
+  run: yarn install
+- name: Build bundled assets
+  run: |
+    yarn build:preview
+    yarn build:l10n
