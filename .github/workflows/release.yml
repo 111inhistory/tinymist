@@ -151,12 +151,18 @@ jobs:
       - name: "Install Node.js"
         uses: "actions/setup-node@v4"
         with:
-          "cache": "yarn"
           "node-version": 24
+      - name: "Install Yarn"
+        run: |
+          corepack enable
+          corepack prepare yarn@1.22.22 --activate
       - name: "Install Node dependencies"
         run: "yarn install"
       - name: "Install Rust toolchain"
         uses: "actions-rust-lang/setup-rust-toolchain@v1"
+      - name: "Allow legacy cross static mut refs"
+        if: "contains(join(matrix.targets, ','), 'loongarch64')"
+        run: "echo \"RUSTFLAGS=${RUSTFLAGS:-} -Astatic-mut-refs\" >> \"$GITHUB_ENV\""
       - name: "Build bundled assets"
         run: |
           yarn build:preview
